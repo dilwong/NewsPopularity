@@ -3,3 +3,5 @@
 *.html
 *.log
 .DS_Store
+
+GensimModels/
