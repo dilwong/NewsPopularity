@@ -1,6 +1,9 @@
 numpy
 pandas
+scikit-learn
 streamlit
-torch
-transformers
+spacy
+gensim
+pytz
+joblib
 lightgbm
