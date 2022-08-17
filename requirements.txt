@@ -1,9 +1,10 @@
-numpy
-pandas
+numpy >= 1.22, < 1.24
+pandas == 1.4.*
 scikit-learn
-streamlit
-spacy
-gensim
-pytz
-joblib
-lightgbm
+streamlit == 1.12.*
+spacy == 3.4.*
+gensim == 4.2.0
+pytz == 2022.*
+joblib == 1.1.0
+lightgbm == 3.3.2
+./FinalModels/en_core_web_sm-3.4.0.tar.gz
