@@ -1,7 +1,12 @@
 import streamlit as st
-import datetime
 
 import numpy as np
+import pandas as pd
+import joblib
+import lightgbm as lgbm
+from sklearn.preprocessing import OrdinalEncoder
+
+from helper import _sections, _feature_columns, time_process, text_len
 
 import spacy
 from spacy.lang.en.stop_words import STOP_WORDS
@@ -10,70 +15,6 @@ from spacy.tokens import Token
 
 from gensim.models import Phrases, LdaModel
 from gensim.corpora import Dictionary
-
-_sections = ['world',
-            'world/europe',
-            'us',
-            'us/politics',
-            'nyregion',
-            'business',
-            'world/asia',
-            'sports/olympics',
-            'opinion',
-            'movies',
-            'sports',
-            'arts/music',
-            'arts/television',
-            'technology',
-            'health',
-            'magazine',
-            'science',
-            'climate',
-            'article',
-            'style',
-            'wirecutter',
-            'espanol',
-            'recipes',
-            'world/middleeast',
-            'business/economy',
-            'podcasts/the-daily',
-            'business/media',
-            'world/americas',
-            'arts',
-            'sports/football',
-            'travel',
-            'world/africa',
-            'sports/basketball',
-            'world/australia',
-            'realestate',
-            'books',
-            'arts/design',
-            'sports/tennis',
-            'well/live',
-            'dining',
-            'briefing',
-            'upshot',
-            'sports/soccer',
-            'well/mind',
-            'theater',
-            'headway',
-            'sports/baseball',
-            'world/canada',
-            'podcasts',
-            'well',
-            'books/review',
-            'obituaries',
-            'business/energy-environment',
-            'well/move',
-            'well/family',
-            'sports/golf',
-            'your-money',
-            'well/eat',
-            'arts/dance',
-            'special-series',
-            'fashion',
-            'business/dealbook'
-            ]
 
 @st.cache(hash_funcs={"spacy.lang.en.English": id})
 def get_spacy_nlp():
@@ -125,9 +66,22 @@ def get_gensim_phrases_and_dictionary():
 def get_lda_model():
     return LdaModel.load(f'FinalModels/lda_model_130_29')
 
+@st.cache(hash_funcs={"sklearn.preprocessing._encoders.OrdinalEncoder": id})
+def get_section_encoder():
+    return joblib.load('FinalModels/section_encoder.joblib')
+
+@st.cache(hash_funcs={"lightgbm.basic.Booster": id})
+def get_tree_ensembles():
+    likes_regressor = lgbm.Booster(model_file = 'FinalModels/lgbm_likes.model')
+    retweets_regressor = lgbm.Booster(model_file = 'FinalModels/lgbm_retweets.model')
+    replies_regressor = lgbm.Booster(model_file = 'FinalModels/lgbm_replies.model')
+    return likes_regressor, retweets_regressor, replies_regressor
+
 nlp = get_spacy_nlp()
 bigrams, trigrams, dictionary = get_gensim_phrases_and_dictionary()
 lda_model = get_lda_model()
+section_encoder = get_section_encoder()
+likes_regressor, retweets_regressor, replies_regressor = get_tree_ensembles()
 
 tab1, tab2 = st.tabs(['Popularity Prediction', 'Visualizations'])
 
@@ -137,19 +91,21 @@ with tab1:
         titleText = st.text_input('Article Title', 'Input title/headline.')
         deckText = st.text_input('Article Subheading', 'Input subheading/drop head/deck that summarizes the article.')
         articleText = st.text_area('Article Text', 'Input the body of the news article.')
-        hour = st.selectbox('Section/Category', sorted(_sections))
+        news_section = st.selectbox('Section/Category', sorted(_sections))
 
         st.markdown("""---""")
 
         dateInput = st.date_input('Date')
 
-        timecol1, timecol2, timecol3 = st.columns(3)
+        timecol1, timecol2, timecol3, timecol4 = st.columns(4)
         with timecol1:
             hour = st.selectbox('Hour', (f'{h:02}' for h in range(1, 12 + 1)))
         with timecol2:
             minute = st.selectbox('Minute', (f'{h:02}' for h in range(0, 60)))
         with timecol3:
             am_or_pm = st.selectbox('AM/PM', ['AM', 'PM'])
+        with timecol4:
+            timezone = st.selectbox('Timezone', ['US/Eastern', 'US/Central', 'US/Mountain', 'US/Pacific'])
 
         article_check1, article_check2, article_check3 = st.columns(3)
         with article_check1:
@@ -176,6 +132,31 @@ with tab1:
     if submitted:
         doc = dictionary.doc2bow(trigrams[bigrams[[token.lemma_ for token in nlp(articleText) if not token._.is_excluded]]])
         topic_vector = np.array(lda_model.get_document_topics(doc, minimum_probability = -1))[:, 1]
-        # st.write(lda_model.print_topic(max(enumerate(topic_vector), key = lambda item : item[1])[0]))
-        for relevant_topic, topic_weight in sorted(enumerate(topic_vector), key = lambda item : -item[1])[:3]:
-            st.write(topic_weight, lda_model.print_topic(relevant_topic))
+        topic_dict = {f'topic_{topic_index:03}' : topic_value for topic_index, topic_value in enumerate(topic_vector)}
+        section_dict = {'section' : section_encoder.transform([[news_section]])[0, 0]}
+        time_dict = time_process(dateInput, hour, minute, am_or_pm, timezone)
+        bool_dict = {'tweet_has_video' : int(tweetHasVideo),
+                    'tweet_has_photo' : int(tweetHasPhoto),
+                    'article_has_video' : int(articleHasVideo),
+                    'article_has_audio' : int(articleHasAudio),
+                    'comments' : int(enableComments)
+                    }
+        len_dict = {'tweetlength' : text_len(tweetText),
+                    'titlelength' : text_len(titleText),
+                    'summarylength' : text_len(deckText),
+                    'articlelength' : text_len(articleText)
+                    }
+        if len_dict['tweetlength'] is None: # Impute the number of words in the tweet if the tweet is not supplied.
+            len_dict['tweetlength'] = 36
+        features_dict = dict(
+            **bool_dict,
+            **len_dict,
+            **section_dict,
+            **time_dict,
+            **topic_dict
+        )
+        features = pd.DataFrame([features_dict])[_feature_columns].to_numpy()
+        likes_score = float(likes_regressor.predict(features))
+        retweets_score = float(retweets_regressor.predict(features))
+        replies_score = float(replies_regressor.predict(features))
+        st.write(10**likes_score, 10**retweets_score, 10**replies_score)
