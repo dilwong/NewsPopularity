@@ -6,7 +6,7 @@ import joblib
 import lightgbm as lgbm
 from sklearn.preprocessing import OrdinalEncoder
 
-from helper import _sections, _feature_columns, time_process, text_len
+from helper import _sections, _feature_columns, time_process, text_len, percentile_rank, number_to_ordinal
 
 import spacy
 from spacy.lang.en.stop_words import STOP_WORDS
@@ -77,23 +77,48 @@ def get_tree_ensembles():
     replies_regressor = lgbm.Booster(model_file = 'FinalModels/lgbm_replies.model')
     return likes_regressor, retweets_regressor, replies_regressor
 
+@st.cache(hash_funcs={"pandas.core.frame.DataFrame": id})
+def get_training_data():
+    features_df = pd.read_parquet('ProcessedData/features.parquet.gzip')
+    metrics_df = pd.read_parquet('ProcessedData/metrics.parquet.gzip')
+    metadata_df = pd.read_parquet('ProcessedData/metadata.parquet.gzip')
+    return features_df, metrics_df, metadata_df
+
 nlp = get_spacy_nlp()
 bigrams, trigrams, dictionary = get_gensim_phrases_and_dictionary()
 lda_model = get_lda_model()
 section_encoder = get_section_encoder()
 likes_regressor, retweets_regressor, replies_regressor = get_tree_ensembles()
+features_df, metrics_df, metadata_df = get_training_data()
+
+with open('style.css') as f:
+    st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html = True)
 
 tab1, tab2 = st.tabs(['Popularity Prediction', 'Visualizations'])
 
 with tab1:
     with st.form('articleForm', clear_on_submit=False):
 
+        st.subheader('Article Information')
+
         titleText = st.text_input('Article Title', 'Input title/headline.')
         deckText = st.text_input('Article Subheading', 'Input subheading/drop head/deck that summarizes the article.')
         articleText = st.text_area('Article Text', 'Input the body of the news article.')
         news_section = st.selectbox('Section/Category', sorted(_sections))
 
+        article_check1, article_check2, article_check3 = st.columns(3)
+        with article_check1:
+            articleHasVideo = st.checkbox('Article includes video?')
+        with article_check2:
+            articleHasAudio = st.checkbox('Article includes audio?')
+        with article_check3:
+            enableComments = st.checkbox('Enable reader comments?')
+
         st.markdown("""---""")
+
+        st.subheader('Tweet Information')
+
+        tweetText = st.text_input('Tweet text', 'Input the Twitter tweet text for this article.')
 
         dateInput = st.date_input('Date')
 
@@ -106,18 +131,6 @@ with tab1:
             am_or_pm = st.selectbox('AM/PM', ['AM', 'PM'])
         with timecol4:
             timezone = st.selectbox('Timezone', ['US/Eastern', 'US/Central', 'US/Mountain', 'US/Pacific'])
-
-        article_check1, article_check2, article_check3 = st.columns(3)
-        with article_check1:
-            articleHasVideo = st.checkbox('Article includes video?')
-        with article_check2:
-            articleHasAudio = st.checkbox('Article includes audio?')
-        with article_check3:
-            enableComments = st.checkbox('Enable reader comments?')
-
-        st.markdown("""---""")
-
-        tweetText = st.text_input('Tweet text', 'Input the Twitter tweet text for this article.')
 
         tweet_check1, tweet_check2 = st.columns(2)
         with tweet_check1:
@@ -159,4 +172,21 @@ with tab1:
         likes_score = float(likes_regressor.predict(features))
         retweets_score = float(retweets_regressor.predict(features))
         replies_score = float(replies_regressor.predict(features))
-        st.write(10**likes_score, 10**retweets_score, 10**replies_score)
+        likes_percentile = int(percentile_rank(likes_score, metrics_df['log_likes']) * 100)
+        retweets_percentile = int(percentile_rank(retweets_score, metrics_df['log_retweets']) * 100)
+        replies_percentile = int(percentile_rank(replies_score, metrics_df['log_replies']) * 100)
+        # output = [
+        #     f'Your article has a predicted number of likes in the {number_to_ordinal(likes_percentile)} percentile.',
+        #     f'Your article has a predicted number of retweets in the {number_to_ordinal(retweets_percentile)} percentile.',
+        #     f'Your article has a predicted number of replies in the {number_to_ordinal(replies_percentile)} percentile.'
+        # ]
+        # st.info('\n\n'.join(output))
+        with st.expander('Prediction Results', expanded = True):
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
+            with metric_col1:
+                st.metric('Likes Percentile', value = number_to_ordinal(likes_percentile))
+            with metric_col2:
+                st.metric('Retweets Percentile', value = number_to_ordinal(retweets_percentile))
+            with metric_col3:
+                st.metric('Replies Percentile', value = number_to_ordinal(replies_percentile))
+            st.write(f'Your article has predicted numbers of likes, retweets, and replies in the {number_to_ordinal(likes_percentile)}, {number_to_ordinal(retweets_percentile)}, and {number_to_ordinal(replies_percentile)} percentiles.')

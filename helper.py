@@ -38,6 +38,15 @@ def text_len(text):
         return None
     return len(text.strip().split()) or None
 
+def percentile_rank(score, population):
+    return (population < score).sum() / len(population)
+
+def number_to_ordinal(number):
+    if number % 100 in [11, 12, 13]:
+        return f'{number}th'
+    suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(number % 10, 'th')
+    return f'{number}{suffix}'
+
 # books/review, your-money, and special-series are not encoded because they were not in the training data
 _sections = ['world',
             'world/europe',

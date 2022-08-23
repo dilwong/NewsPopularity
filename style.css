@@ -1,0 +1,7 @@
+div[data-testid="metric-container"] {
+    padding-left: 10%;
+}
+
+div[data-testid="stExpander"] {
+    background-color: #e3fdff;
+}
