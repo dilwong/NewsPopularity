@@ -144,6 +144,8 @@ with tab1:
 
     if submitted:
         doc = dictionary.doc2bow(trigrams[bigrams[[token.lemma_ for token in nlp(articleText) if not token._.is_excluded]]])
+        lda_model.gamma_threshold = 1e-6
+        lda_model.random_state = np.random.mtrand.RandomState(137)
         topic_vector = np.array(lda_model.get_document_topics(doc, minimum_probability = -1))[:, 1]
         topic_dict = {f'topic_{topic_index:03}' : topic_value for topic_index, topic_value in enumerate(topic_vector)}
         section_dict = {'section' : section_encoder.transform([[news_section]])[0, 0]}
