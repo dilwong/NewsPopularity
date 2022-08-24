@@ -41,7 +41,7 @@ def text_len(text):
 def percentile_rank(score, population):
     return (population < score).sum() / len(population)
 
-def number_to_ordinal(number):
+def number_to_ordinal(number: int) -> str:
     if number % 100 in [11, 12, 13]:
         return f'{number}th'
     suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(number % 10, 'th')
@@ -258,3 +258,5 @@ _feature_columns = ['tweet_has_video',
                     'topic_128',
                     'topic_129'
                     ]
+
+_topics = [feature for feature in _feature_columns if 'topic' in feature]

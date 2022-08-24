@@ -1,12 +1,14 @@
 import streamlit as st
 
+from typing import Union
+
 import numpy as np
 import pandas as pd
 import joblib
 import lightgbm as lgbm
 from sklearn.preprocessing import OrdinalEncoder
 
-from helper import _sections, _feature_columns, time_process, text_len, percentile_rank, number_to_ordinal
+from helper import _sections, _feature_columns, _topics, time_process, text_len, percentile_rank, number_to_ordinal
 
 import spacy
 from spacy.lang.en.stop_words import STOP_WORDS
@@ -15,6 +17,7 @@ from spacy.tokens import Token
 
 from gensim.models import Phrases, LdaModel
 from gensim.corpora import Dictionary
+# from gensim.matutils import cossim, hellinger
 
 @st.cache(hash_funcs={"spacy.lang.en.English": id})
 def get_spacy_nlp():
@@ -91,6 +94,79 @@ section_encoder = get_section_encoder()
 likes_regressor, retweets_regressor, replies_regressor = get_tree_ensembles()
 features_df, metrics_df, metadata_df = get_training_data()
 
+def get_document_similarities(vec : np.ndarray , metric : str = 'cosine', sort : Union[bool, str] = False) -> pd.DataFrame:
+    r"""
+    Given a vector of topic probabilities, return a DataFrame of similarities with respect to a corpus of news articles (the training data).
+
+    Args:
+        vec : np.ndarray
+            The vector of topic probabilities.
+        metric : str
+            Either 'cosine' or 'hellinger' (case-insensitive).
+            'both' returns a DataFrame with both cosine and Hellinger similarities, scaled between 0 and 1.
+        sort : bool | str
+            If not False, sort descending by similarity.
+            If metric == 'both', provide a string 'cosine' or 'hellinger' (case-sensitive) to sort by cosine or Hellinger similarity. Otherwise ignored.
+    
+    Return:
+        A pandas DataFrame containing values between [0, 1] that measure the similarity of the article described by vec and the articles in the training data.
+        Values closer to 1 represent more similar articles, while values closer to 0 represent more dissimilar articles.
+    """
+    corpus_topics = features_df[_topics]
+    if metric.lower() == 'cosine':
+        l2_normalized_vec = vec/((vec**2).sum()**0.5)
+        l2_normalized_corpus_topics = corpus_topics.divide((corpus_topics**2).sum(axis = 1)**0.5, axis = 'index')
+        cos_similarity = (l2_normalized_corpus_topics * l2_normalized_vec).sum(axis = 1)
+        # cos_similarity = ((cos_similarity + 1) / 2).rename('similarity') # cosine similarity is [-1, 1], so map it to [0, 1]
+        cos_similarity = cos_similarity.rename('similarity') # Actually, since all elements of vec >= 0, cosine similarity already is [0, 1]
+        if sort:
+            cos_similarity = cos_similarity.sort_values(ascending = False)
+        return cos_similarity.to_frame()
+    if metric.lower() == 'hellinger':
+        distance = ((0.5 * ((corpus_topics**0.5 - vec**0.5)**2).sum(axis = 1))**0.5)
+        hellinger_similarity = (-distance + 1).rename('similarity') # most similar is distance = 0, least similar is distance = 1
+        if sort:
+            hellinger_similarity = hellinger_similarity.sort_values(ascending = False)
+        return hellinger_similarity.to_frame()
+    if metric.lower() == 'both':
+        cos_similarity = get_document_similarities(vec, metric = 'cosine').rename(columns = {'similarity': 'cosine similarity'})
+        hellinger_similarity = get_document_similarities(vec, metric = 'hellinger').rename(columns = {'similarity': 'hellinger similarity'})
+        combined_similarity = cos_similarity.join(hellinger_similarity)
+        if sort == 'cosine':
+            combined_similarity = combined_similarity.sort_values(by = 'cosine similarity', ascending = False)
+        elif sort == 'hellinger':
+            combined_similarity = combined_similarity.sort_values(by = 'hellinger similarity', ascending = False)
+        return combined_similarity
+    assert False, 'metric must be cosine or hellinger'
+
+def filter_articles_on_similarity(topic_sim : pd.DataFrame) -> pd.DataFrame:
+    r"""
+    Returns pandas DataFrame with at least 6 articles with large similarities.
+    """
+    MIN_ARTICLES = 6
+    similarity_discount_factor = 0.8
+    max_cosine = np.max(topic_sim['cosine similarity'])
+    max_hellinger = np.max(topic_sim['hellinger similarity'])
+    while True:
+        # topic_sim_mask = (topic_sim['cosine similarity'] > similarity_discount_factor * max_cosine) | (topic_sim['hellinger similarity'] > similarity_discount_factor * max_hellinger)
+        topic_sim_mask = (topic_sim['cosine similarity'] > similarity_discount_factor * max_cosine) & (topic_sim['hellinger similarity'] > similarity_discount_factor * max_hellinger)
+        if topic_sim_mask.sum() >= MIN_ARTICLES:
+            break
+        similarity_discount_factor -= 0.1
+    return topic_sim[topic_sim_mask]
+
+def print_articles(articles : pd.DataFrame):
+    r'''
+    Iterating through each row in a pandas DataFrame, write a link to each article (with the article title as the text) to the Streamlit app.
+    If the article has been tagged by the New York Times, also write the tags.
+    '''
+    for _, row in articles.iterrows():
+        if row['metadata_keywords'] is None:
+            metadata_keywords = ''
+        else:
+            metadata_keywords = f"  \n<b>Tags</b>: {', '.join([f'<nobr>`{s}`</nobr>' for s in row['metadata_keywords'].split('|')])}"
+        st.markdown(f"<b>[{row['title']}]({row['url']})</b>{metadata_keywords}", unsafe_allow_html = True)
+
 with open('style.css') as f:
     st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html = True)
 
@@ -146,8 +222,10 @@ with tab1:
         doc = dictionary.doc2bow(trigrams[bigrams[[token.lemma_ for token in nlp(articleText) if not token._.is_excluded]]])
         lda_model.gamma_threshold = 1e-6
         lda_model.random_state = np.random.mtrand.RandomState(137)
-        topic_vector = np.array(lda_model.get_document_topics(doc, minimum_probability = -1))[:, 1]
+        doc_topic = lda_model.get_document_topics(doc, minimum_probability = -1)
+        topic_vector = np.array(doc_topic)[:, 1]
         topic_dict = {f'topic_{topic_index:03}' : topic_value for topic_index, topic_value in enumerate(topic_vector)}
+        
         section_dict = {'section' : section_encoder.transform([[news_section]])[0, 0]}
         time_dict = time_process(dateInput, hour, minute, am_or_pm, timezone)
         bool_dict = {'tweet_has_video' : int(tweetHasVideo),
@@ -163,6 +241,7 @@ with tab1:
                     }
         if len_dict['tweetlength'] is None: # Impute the number of words in the tweet if the tweet is not supplied.
             len_dict['tweetlength'] = 36
+        
         features_dict = dict(
             **bool_dict,
             **len_dict,
@@ -171,18 +250,20 @@ with tab1:
             **topic_dict
         )
         features = pd.DataFrame([features_dict])[_feature_columns].to_numpy()
+        
         likes_score = float(likes_regressor.predict(features))
         retweets_score = float(retweets_regressor.predict(features))
         replies_score = float(replies_regressor.predict(features))
         likes_percentile = int(percentile_rank(likes_score, metrics_df['log_likes']) * 100)
         retweets_percentile = int(percentile_rank(retweets_score, metrics_df['log_retweets']) * 100)
         replies_percentile = int(percentile_rank(replies_score, metrics_df['log_replies']) * 100)
-        # output = [
-        #     f'Your article has a predicted number of likes in the {number_to_ordinal(likes_percentile)} percentile.',
-        #     f'Your article has a predicted number of retweets in the {number_to_ordinal(retweets_percentile)} percentile.',
-        #     f'Your article has a predicted number of replies in the {number_to_ordinal(replies_percentile)} percentile.'
-        # ]
-        # st.info('\n\n'.join(output))
+
+        topic_sim = get_document_similarities(topic_vector, metric = 'both').join(metadata_df).join(metrics_df)
+        topic_sim = topic_sim.drop_duplicates(subset = 'title') # Turns out that the NYT reposts its articles on Twitter multiple times, sometimes with wildly differing social media stats.
+        topic_sim = filter_articles_on_similarity(topic_sim).sort_values(by = 'log_likes', ascending = False)
+        most_popular_articles = topic_sim.iloc[:3, :]
+        least_popular_articles = topic_sim.iloc[-1:-3-1:-1, :]
+        
         with st.expander('Prediction Results', expanded = True):
             metric_col1, metric_col2, metric_col3 = st.columns(3)
             with metric_col1:
@@ -192,3 +273,9 @@ with tab1:
             with metric_col3:
                 st.metric('Replies Percentile', value = number_to_ordinal(replies_percentile))
             st.write(f'Your article has predicted numbers of likes, retweets, and replies in the {number_to_ordinal(likes_percentile)}, {number_to_ordinal(retweets_percentile)}, and {number_to_ordinal(replies_percentile)} percentiles.')
+            
+            st.markdown('#### Popular related articles')
+            print_articles(most_popular_articles)
+
+            st.markdown('#### Unpopular related articles')
+            print_articles(least_popular_articles)

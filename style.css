@@ -5,3 +5,8 @@ div[data-testid="metric-container"] {
 div[data-testid="stExpander"] {
     background-color: #e3fdff;
 }
+
+code {
+    background: #ffffff;
+    color: #ff0000;
+}
