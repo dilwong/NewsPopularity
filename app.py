@@ -9,6 +9,7 @@ import lightgbm as lgbm
 from sklearn.preprocessing import OrdinalEncoder
 
 from helper import _sections, _feature_columns, _topics, time_process, text_len, percentile_rank, number_to_ordinal
+from fake_news import fake_title, fake_deck, fake_article, fake_tweet, fake_section
 
 import spacy
 from spacy.lang.en.stop_words import STOP_WORDS
@@ -18,6 +19,22 @@ from spacy.tokens import Token
 from gensim.models import Phrases, LdaModel
 from gensim.corpora import Dictionary
 # from gensim.matutils import cossim, hellinger
+
+if 'title_text' not in st.session_state:
+    st.session_state['title_text'] = 'Input title/headline.'
+if 'deck_text' not in st.session_state:
+    st.session_state['deck_text'] = 'Input subheading/drop head/deck that summarizes the article.'
+if 'article_text' not in st.session_state:
+    st.session_state['article_text'] = 'Input the body of the news article.'
+if 'tweet_text' not in st.session_state:
+    st.session_state['tweet_text'] = 'Input the Twitter tweet text for this article.'
+
+def insert_default_article():
+    st.session_state['title_text'] = fake_title
+    st.session_state['deck_text'] = fake_deck
+    st.session_state['article_text'] = fake_article
+    st.session_state['tweet_text'] = fake_tweet
+    st.session_state['news_section'] = fake_section
 
 @st.cache(hash_funcs={"spacy.lang.en.English": id})
 def get_spacy_nlp():
@@ -177,10 +194,10 @@ with tab1:
 
         st.subheader('Article Information')
 
-        titleText = st.text_input('Article Title', 'Input title/headline.')
-        deckText = st.text_input('Article Subheading', 'Input subheading/drop head/deck that summarizes the article.')
-        articleText = st.text_area('Article Text', 'Input the body of the news article.')
-        news_section = st.selectbox('Section/Category', sorted(_sections))
+        titleText = st.text_input('Article Title', key = 'title_text')
+        deckText = st.text_input('Article Subheading', key = 'deck_text')
+        articleText = st.text_area('Article Text', key = 'article_text')
+        news_section = st.selectbox('Section/Category', sorted(_sections), key = 'news_section')
 
         article_check1, article_check2, article_check3 = st.columns(3)
         with article_check1:
@@ -194,7 +211,7 @@ with tab1:
 
         st.subheader('Tweet Information')
 
-        tweetText = st.text_input('Tweet text', 'Input the Twitter tweet text for this article.')
+        tweetText = st.text_input('Tweet text', key = 'tweet_text')
 
         dateInput = st.date_input('Date')
 
@@ -218,7 +235,9 @@ with tab1:
 
         submitted = st.form_submit_button('Submit')
 
-    if submitted:
+    if not submitted:
+        _ = st.button("I don't have a news article. Please fill in a default news article for me.", on_click = insert_default_article)
+    else:
         doc = dictionary.doc2bow(trigrams[bigrams[[token.lemma_ for token in nlp(articleText) if not token._.is_excluded]]])
         lda_model.gamma_threshold = 1e-6
         lda_model.random_state = np.random.mtrand.RandomState(137)
