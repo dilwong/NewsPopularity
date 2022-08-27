@@ -8,6 +8,11 @@ import joblib
 import lightgbm as lgbm
 from sklearn.preprocessing import OrdinalEncoder
 
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
+import seaborn as sns
+import textwrap
+
 from helper import _sections, _feature_columns, _topics, time_process, text_len, percentile_rank, number_to_ordinal
 from fake_news import fake_title, fake_deck, fake_article, fake_tweet, fake_section
 
@@ -18,7 +23,6 @@ from spacy.tokens import Token
 
 from gensim.models import Phrases, LdaModel
 from gensim.corpora import Dictionary
-# from gensim.matutils import cossim, hellinger
 
 if 'title_text' not in st.session_state:
     st.session_state['title_text'] = 'Input title/headline.'
@@ -104,12 +108,22 @@ def get_training_data():
     metadata_df = pd.read_parquet('ProcessedData/metadata.parquet.gzip')
     return features_df, metrics_df, metadata_df
 
+@st.cache(hash_funcs={"pandas.core.frame.DataFrame": id})
+def get_visualization_data():
+    curated_topics = []
+    with open('ProcessedData/topic_keywords', 'rt') as f:
+        for word in f:
+            curated_topics.append(word.strip())
+    keyword_loglikes_df = pd.read_parquet('ProcessedData/keyword_distributions.parquet.gzip')
+    return curated_topics, keyword_loglikes_df
+
 nlp = get_spacy_nlp()
 bigrams, trigrams, dictionary = get_gensim_phrases_and_dictionary()
 lda_model = get_lda_model()
 section_encoder = get_section_encoder()
 likes_regressor, retweets_regressor, replies_regressor = get_tree_ensembles()
 features_df, metrics_df, metadata_df = get_training_data()
+curated_topics, keyword_loglikes_df = get_visualization_data()
 
 def get_document_similarities(vec : np.ndarray , metric : str = 'cosine', sort : Union[bool, str] = False) -> pd.DataFrame:
     r"""
@@ -134,7 +148,6 @@ def get_document_similarities(vec : np.ndarray , metric : str = 'cosine', sort :
         l2_normalized_vec = vec/((vec**2).sum()**0.5)
         l2_normalized_corpus_topics = corpus_topics.divide((corpus_topics**2).sum(axis = 1)**0.5, axis = 'index')
         cos_similarity = (l2_normalized_corpus_topics * l2_normalized_vec).sum(axis = 1)
-        # cos_similarity = ((cos_similarity + 1) / 2).rename('similarity') # cosine similarity is [-1, 1], so map it to [0, 1]
         cos_similarity = cos_similarity.rename('similarity') # Actually, since all elements of vec >= 0, cosine similarity already is [0, 1]
         if sort:
             cos_similarity = cos_similarity.sort_values(ascending = False)
@@ -165,7 +178,6 @@ def filter_articles_on_similarity(topic_sim : pd.DataFrame) -> pd.DataFrame:
     max_cosine = np.max(topic_sim['cosine similarity'])
     max_hellinger = np.max(topic_sim['hellinger similarity'])
     while True:
-        # topic_sim_mask = (topic_sim['cosine similarity'] > similarity_discount_factor * max_cosine) | (topic_sim['hellinger similarity'] > similarity_discount_factor * max_hellinger)
         topic_sim_mask = (topic_sim['cosine similarity'] > similarity_discount_factor * max_cosine) & (topic_sim['hellinger similarity'] > similarity_discount_factor * max_hellinger)
         if topic_sim_mask.sum() >= MIN_ARTICLES:
             break
@@ -181,6 +193,7 @@ def print_articles(articles : pd.DataFrame):
         if row['metadata_keywords'] is None:
             metadata_keywords = ''
         else:
+            # HTML tags <nobr></nobr> cause keyword tags to overflow the expander box when they are too long compared to the screen size (e.g. rendered on mobile browsers)
             metadata_keywords = f"  \n<b>Tags</b>: {', '.join([f'<nobr>`{s}`</nobr>' for s in row['metadata_keywords'].split('|')])}"
         st.markdown(f"<b>[{row['title']}]({row['url']})</b>{metadata_keywords}", unsafe_allow_html = True)
 
@@ -298,3 +311,26 @@ with tab1:
 
             st.markdown('#### Unpopular related articles')
             print_articles(least_popular_articles)
+
+with tab2:
+    st.subheader('Distribution Plot of Twitter Likes per Keyword')
+    order = st.multiselect('Keywords/Tags:', curated_topics)
+    if order:
+        if len(order) > 10:
+            st.write('Please input 10 or less keywords.')
+        else:
+            if len(order) > 5:
+                st.write("Please don't exceed 5 keywords.")
+            fig, ax = plt.subplots(figsize = (25, 5))
+            ax.grid(zorder = 0)
+            ax.yaxis.set_major_locator(MultipleLocator(1))
+            boxen = sns.boxenplot(x = 'keyword', y = 'log_likes', data = keyword_loglikes_df, ax = ax, order = order)
+            ax.set_xticklabels([textwrap.fill(lab, 6, break_long_words = False) for lab in order])
+            plt.setp(boxen.collections, zorder = 10)
+            plt.setp(boxen.lines, zorder=11)
+            ax.set_ylim(1,5)
+            ax.set_xlabel('Keyword Tags', fontsize = 22)
+            ax.set_ylabel(r'$\log_{10}({\rm Likes})$', fontsize = 22)
+            ax.tick_params(axis="y", labelsize=18)
+            ax.tick_params(axis="x", labelsize=18)
+            st.pyplot(fig = fig)
