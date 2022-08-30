@@ -13,7 +13,7 @@ from matplotlib.ticker import MultipleLocator
 import seaborn as sns
 import textwrap
 
-from helper import _sections, _feature_columns, _topics, time_process, text_len, percentile_rank, number_to_ordinal
+from helper import _sections, _feature_columns, _topics, _select_categoricals, _conditional_proportions_options, time_process, text_len, percentile_rank, number_to_ordinal
 from fake_news import fake_title, fake_deck, fake_article, fake_tweet, fake_section
 
 import spacy
@@ -106,6 +106,9 @@ def get_training_data():
     features_df = pd.read_parquet('ProcessedData/features.parquet.gzip')
     metrics_df = pd.read_parquet('ProcessedData/metrics.parquet.gzip')
     metadata_df = pd.read_parquet('ProcessedData/metadata.parquet.gzip')
+    seconds_df = pd.read_parquet('ProcessedData/seconds.parquet.gzip')
+    seconds_df['hour'] = seconds_df['seconds']//3600
+    features_df = features_df.join(seconds_df['hour'].to_frame())
     return features_df, metrics_df, metadata_df
 
 @st.cache(hash_funcs={"pandas.core.frame.DataFrame": id})
@@ -116,6 +119,25 @@ def get_visualization_data():
             curated_topics.append(word.strip())
     keyword_loglikes_df = pd.read_parquet('ProcessedData/keyword_distributions.parquet.gzip')
     return curated_topics, keyword_loglikes_df
+
+@st.cache(hash_funcs={"seaborn.axisgrid.FacetGrid": id})
+def plot_conditional_proportions(column, features_frame, metrics_frame, xlabel = None, order = None, xticks = None, aspect = 1):
+    with sns.plotting_context("notebook", font_scale = 1.5):
+        reduced_frame = features_frame[column].to_frame()
+        # There's certainly a more efficient (broadcasting-based) way to do this:
+        likes_ptiles = metrics_frame['log_likes'].apply(lambda x: 100 * percentile_rank(x, metrics_frame['log_likes']))
+        reduced_frame['Likes Percentile'] = pd.cut(likes_ptiles, [0, 20, 40, 60, 80, 100]).cat.rename_categories(lambda x: f'{x.left} - {x.right}')
+        facetgrid = (reduced_frame
+        .groupby(column)['Likes Percentile'].value_counts(normalize = True).rename('Conditional Proportion')
+        .reset_index().rename(columns = {'level_1': 'Likes Percentile'})
+        .pipe((sns.catplot, 'data'), kind = 'bar', hue = 'Likes Percentile', y = 'Conditional Proportion', x = column, order = order, height = 5, aspect = aspect, legend_out = True)
+        )
+        facetgrid.ax.set_ylabel('Relative Proportion')
+        if xlabel is not None:
+            facetgrid.ax.set_xlabel(xlabel)
+        if xticks is not None:
+            facetgrid.ax.set_xticklabels(xticks)
+    return facetgrid
 
 nlp = get_spacy_nlp()
 bigrams, trigrams, dictionary = get_gensim_phrases_and_dictionary()
@@ -334,3 +356,16 @@ with tab2:
             ax.tick_params(axis="y", labelsize=18)
             ax.tick_params(axis="x", labelsize=18)
             st.pyplot(fig = fig)
+    
+    st.subheader('Likes Percentile Proportion Conditional on Feature')
+    barplot_feature = st.selectbox('Feature:', [''] + list(_select_categoricals.keys()))
+    # Too bad pattern matching isn't available until Python 3.10
+    if barplot_feature != '':
+        relative_props_plot = plot_conditional_proportions(
+            _select_categoricals[barplot_feature],
+            features_frame = features_df,
+            metrics_frame = metrics_df,
+            **_conditional_proportions_options[_select_categoricals[barplot_feature]]
+        )
+        # st.pyplot(relative_props_plot.fig)
+        st.pyplot(relative_props_plot)

@@ -260,3 +260,59 @@ _feature_columns = ['tweet_has_video',
                     ]
 
 _topics = [feature for feature in _feature_columns if 'topic' in feature]
+
+_select_categoricals = {
+    'Article includes video?' : 'article_has_video',
+    'Article includes audio?' : 'article_has_audio',
+    'Enable reader comments?' : 'comments',
+    'Tweet includes video?' : 'tweet_has_video',
+    'Tweet includes photograph?' : 'tweet_has_photo',
+    'Day of week' : 'dayofweek',
+    'Time of day' : 'hour'
+}
+
+# Maybe namedtuple or dataclass would be more appropriate here
+_conditional_proportions_options = {
+    'tweet_has_video' : dict(
+        xlabel = 'Does the tweet include a video?',
+        order = [0, 1],
+        xticks = ['No', 'Yes'],
+        aspect = 1.25
+    ),
+    'tweet_has_photo' : dict(
+        xlabel = 'Does the tweet include a photo?',
+        order = [0, 1],
+        xticks = ['No', 'Yes'],
+        aspect = 1.25
+    ),
+    'article_has_video' : dict(
+        xlabel = 'Does the article include a video?',
+        order = [0, 1],
+        xticks = ['No', 'Yes'],
+        aspect = 1.25
+    ),
+    'article_has_audio' : dict(
+        xlabel = 'Does the article include audio?',
+        order = [0, 1],
+        xticks = ['No', 'Yes'],
+        aspect = 1.25
+    ),
+    'comments' : dict(
+        xlabel = 'Are readers allowed to comment on the article webpage?',
+        order = [0, 1],
+        xticks = ['No', 'Yes'],
+        aspect = 1.25
+    ),
+    'dayofweek' : dict(
+        xlabel = 'Day of the week posted on Twitter',
+        order = range(7),
+        xticks = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+        aspect = 3
+    ),
+    'hour' : dict(
+        xlabel = 'Time of Twitter post',
+        order = range(24),
+        xticks = ['12 AM'] + [f'{h} AM' for h in range(1, 12)] + ['12 PM'] + [f'{h} PM' for h in range(1, 12)],
+        aspect = 4
+    )
+}
