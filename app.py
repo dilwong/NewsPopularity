@@ -359,7 +359,6 @@ with tab2:
     
     st.subheader('Likes Percentile Proportion Conditional on Feature')
     barplot_feature = st.selectbox('Feature:', [''] + list(_select_categoricals.keys()))
-    # Too bad pattern matching isn't available until Python 3.10
     if barplot_feature != '':
         relative_props_plot = plot_conditional_proportions(
             _select_categoricals[barplot_feature],
@@ -367,5 +366,4 @@ with tab2:
             metrics_frame = metrics_df,
             **_conditional_proportions_options[_select_categoricals[barplot_feature]]
         )
-        # st.pyplot(relative_props_plot.fig)
         st.pyplot(relative_props_plot)
