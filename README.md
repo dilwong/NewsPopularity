@@ -38,3 +38,7 @@ Nevertheless, here are a few ideas for possibly improving the model:
 - There are a bunch of other methods for modeling the topic of a news article, such as soft clustering algorithms (e.g. Gaussian mixtures), latent semantic analysis ([LSA, also provided by Gensim](https://radimrehurek.com/gensim/models/lsimodel.html)), and LDA with TF-IDF vectors (it doesn't make sense, but Gensim can still do it).
 - Use a sequence-to-one model (e.g. just use BERT for regression).
 - More aggressive regularization.
+
+## Data
+
+Tweet metrics are available [here](https://www.kaggle.com/datasets/dilwong/newspopularity), and OpenAI text-embedding-ada-002 embeddings for each news article (not used in the model) are available [here](https://www.kaggle.com/datasets/dilwong/openai-embeddings-for-new-york-times-articles).

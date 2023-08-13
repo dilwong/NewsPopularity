@@ -2,9 +2,11 @@
 *.html
 *.log
 .DS_Store
+.env
 
 GensimModels/
 TreeModels/
 ScrappedData/
 SentimentData/
 FullModels/
+EmbeddingData/
